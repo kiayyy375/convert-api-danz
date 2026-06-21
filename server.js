@@ -244,7 +244,7 @@ if (currentProcess >= MAX_PROCESS) {
 currentProcess++
 
 
-        const perintahFfmpeg = `ffmpeg -loglevel panic -i "${file.path}" -vf "scale='if(gte(iw,ih),-2,720)':'if(gte(iw,ih),720,-2)',hqdn3d=1.0:1.0:2.0:2.0,unsharp=3:3:0.4:3:3:0.4" -r ${targetFps} -c:v libx264 -preset faster -crf 17 -aq-mode 3 -colorspace bt709 -color_trc bt709 -color_primaries bt709 -maxrate 12M -bufsize 12M -pix_fmt yuv420p -threads 2 -c:a aac -b:a 128k -movflags +faststart "${normalized}"`
+        const perintahFfmpeg = `ffmpeg -loglevel panic -i "${file.path}" -vf "scale='if(gte(iw,ih),-2,720)':'if(gte(iw,ih),720,-2)',hqdn3d=0.5:0.5:1.0:1.0,unsharp=3:3:0.3:3:3:0.3" -r ${targetFps} -c:v libx264 -preset superfast -crf 18 -aq-mode 3 -colorspace bt709 -color_trc bt709 -color_primaries bt709 -maxrate 8M -bufsize 8M -pix_fmt yuv420p "${normalized}"`
 
         const videoId = `vid_${Date.now()}`
         global.videoProgress[videoId] = { status: "proses", message: "Sedang mengompres video jadi HD..." }
