@@ -297,7 +297,7 @@ if (
 
     global.videoProgress[videoId] = {
         status: "error",
-        message: "Video rusak atau file tidak lengkap."
+        message: "Video tidak dapat diproses oleh server. Coba gunakan video lain."
     }
 
     sendTelegram(
