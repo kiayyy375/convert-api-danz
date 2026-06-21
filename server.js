@@ -276,7 +276,7 @@ currentProcess++
         exec(
     perintahFfmpeg,
     { maxBuffer: 1024 * 1024 * 100 },
-    (err) => {
+    (err, stdout, stderr) => {
             currentProcess--;
 
             if (waitingQueue.length > 0) {
@@ -287,42 +287,37 @@ currentProcess++
             if (fs.existsSync(file.path)) {
                 fs.unlinkSync(file.path);
             }
+const ffmpegLog = String(stderr || "")
 
-if (err) {
-
-    const errorText = String(err.message || err)
-
-    console.log("[DanzClean Background Error]:", errorText)
-
-    let pesanError = "Terjadi kesalahan saat memproses video."
-
-    if (
-        errorText.includes("Invalid data") ||
-        errorText.includes("missing picture") ||
-        errorText.includes("no frame")
-    ) {
-        pesanError = "Video rusak atau file tidak lengkap."
-    }
+if (
+    ffmpegLog.includes("Invalid data") ||
+    ffmpegLog.includes("missing picture") ||
+    ffmpegLog.includes("no frame")
+) {
 
     global.videoProgress[videoId] = {
         status: "error",
-        message: pesanError
+        message: "Video rusak atau file tidak lengkap."
     }
 
     sendTelegram(
-`❌ DanzClean Error
+`❌ Video Rusak
 
 Nomor: ${nomor}
 
 File:
 ${file.originalname}
 
+FPS: ${fpsVideo}
+
 Error:
-${errorText}`
+${ffmpegLog.slice(0, 3000)}`
     )
 
     return
 }
+
+
 
             const domainPenyedia = req.get("host");
             const protocolPenyedia = req.protocol;
@@ -370,5 +365,4 @@ app.use((err, req, res, next) => {
 
 app.listen(process.env.PORT || 3000, () => {
     console.log("API READY")
-    sendTelegram("✅ DanzClean Online")
 })
