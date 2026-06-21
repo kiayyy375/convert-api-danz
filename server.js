@@ -230,8 +230,10 @@ const fpsVideo = await new Promise((resolve) => {
 
 })
 
-
-const targetFps = fpsVideo < 60 ? 60 : fpsVideo;
+const targetFps =
+    fpsVideo > 60
+        ? fpsVideo
+        : 60
 
 if (currentProcess >= MAX_PROCESS) {
     await new Promise(resolve => {
@@ -241,7 +243,8 @@ if (currentProcess >= MAX_PROCESS) {
 
 currentProcess++
 
-        const perintahFfmpeg = `ffmpeg -loglevel error -fflags +discardcorrupt+genpts -i "${file.path}" -vf "scale=ih*720/iw:720:force_original_aspect_ratio=decrease,pad=720:720:(ow-iw)/2:(oh-ih)/2,hqdn3d=0.5:0.5:1.0:1.0,unsharp=3:3:0.3:3:3:0.3" -r ${targetFps} -c:v libx264 -preset superfast -crf 18 -max_muxing_queue_size 4096 -colorspace bt709 -color_trc bt709 -color_primaries bt709 -maxrate 8M -bufsize 8M -pix_fmt yuv420p "${normalized}"`
+
+        const perintahFfmpeg = `ffmpeg -i "${file.path}" -vf "scale='if(gte(iw,ih),-2,720)':'if(gte(iw,ih),720,-2)',hqdn3d=1.0:1.0:2.0:2.0,unsharp=3:3:0.4:3:3:0.4" -r ${targetFps} -c:v libx264 -preset faster -crf 17 -aq-mode 3 -colorspace bt709 -color_trc bt709 -color_primaries bt709 -maxrate 12M -bufsize 12M -pix_fmt yuv420p -threads 2 -c:a aac -b:a 128k -movflags +faststart "${normalized}"`
 
         const videoId = `vid_${Date.now()}`
         global.videoProgress[videoId] = { status: "proses", message: "Sedang mengompres video jadi HD..." }
@@ -254,8 +257,7 @@ currentProcess++
         });
 
 
-
-        exec(perintahFfmpeg, { maxBuffer: 1024 * 1024 * 15 }, (err) => {
+        exec(perintahFfmpeg, (err) => {
             currentProcess--;
 
             if (waitingQueue.length > 0) {
