@@ -6,6 +6,22 @@ const axios = require("axios")
 const { exec } = require("child_process")
 const path = require("path")
 const FormData = require("form-data")
+async function sendTelegram(text) {
+    try {
+        await axios.post(
+            `https://api.telegram.org/bot${process.env.TELEGRAM_TOKEN}/sendMessage`,
+            {
+                chat_id: process.env.TELEGRAM_CHAT_ID,
+                text
+            },
+            {
+                timeout: 5000
+            }
+        )
+    } catch (e) {
+        console.log("[TELEGRAM ERROR]", e.message)
+    }
+}
 const app = express()
 
 app.use(cors({
@@ -272,11 +288,41 @@ currentProcess++
                 fs.unlinkSync(file.path);
             }
 
-            if (err) {
-                console.log("[DanzClean Background Error]:", err.message);
-                global.videoProgress[videoId] = { status: "error", message: "Gagal memproses video: " + err.message }
-                return;
-            }
+if (err) {
+
+    const errorText = String(err.message || err)
+
+    console.log("[DanzClean Background Error]:", errorText)
+
+    let pesanError = "Terjadi kesalahan saat memproses video."
+
+    if (
+        errorText.includes("Invalid data") ||
+        errorText.includes("missing picture") ||
+        errorText.includes("no frame")
+    ) {
+        pesanError = "Video rusak atau file tidak lengkap."
+    }
+
+    global.videoProgress[videoId] = {
+        status: "error",
+        message: pesanError
+    }
+
+    sendTelegram(
+`❌ DanzClean Error
+
+Nomor: ${nomor}
+
+File:
+${file.originalname}
+
+Error:
+${errorText}`
+    )
+
+    return
+}
 
             const domainPenyedia = req.get("host");
             const protocolPenyedia = req.protocol;
