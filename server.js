@@ -348,7 +348,7 @@ ${targetBitrateKbps}
 
 Error:
 
-${errorText.slice(0,3500)}`
+${errorText.slice(-3500)}`
     )
 
     return
