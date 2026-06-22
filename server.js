@@ -312,14 +312,18 @@ currentProcess++
             }
 const ffmpegLog = String(stderr || "")
 
-if (err) {
+const sukses =
+    fs.existsSync(normalized) &&
+    fs.statSync(normalized).size > 500 * 1024
+
+if (err && !sukses) {
 
     const errorText =
         String(stderr || err.message || err)
 
     global.videoProgress[videoId] = {
         status: "error",
-        message: "Video tidak dapat diproses oleh server. Coba gunakan video lain.."
+        message: "Video tidak dapat diproses oleh server."
     }
 
     sendTelegram(
@@ -353,7 +357,6 @@ ${errorText.slice(-3500)}`
 
     return
 }
-
 
 
             const domainPenyedia = req.get("host");
