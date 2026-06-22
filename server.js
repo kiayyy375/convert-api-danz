@@ -260,7 +260,30 @@ if (currentProcess >= MAX_PROCESS) {
 currentProcess++
 
 
-        const perintahFfmpeg = `ffmpeg -i "${file.path}" -vf "scale='if(gte(iw,ih),-2,720)':'if(gte(iw,ih),720,-2)',hqdn3d=1.0:1.0:2.0:2.0,unsharp=3:3:0.4:3:3:0.4" -r ${targetFps} -c:v libx264 -preset faster -crf 17 -aq-mode 3 -colorspace bt709 -color_trc bt709 -color_primaries bt709 -maxrate 12M -bufsize 12M -pix_fmt yuv420p -threads 2 -c:a aac -b:a 128k -movflags +faststart "${normalized}"`
+        const perintahFfmpeg =
+`ffmpeg \
+-err_detect ignore_err \
+-fflags +discardcorrupt \
+-analyzeduration 100M \
+-probesize 100M \
+-i "${file.path}" \
+-vf "scale='if(gte(iw,ih),-2,720)':'if(gte(iw,ih),720,-2)',hqdn3d=1.0:1.0:2.0:2.0,unsharp=3:3:0.4:3:3:0.4" \
+-r ${targetFps} \
+-c:v libx264 \
+-preset faster \
+-crf 17 \
+-aq-mode 3 \
+-colorspace bt709 \
+-color_trc bt709 \
+-color_primaries bt709 \
+-maxrate 12M \
+-bufsize 12M \
+-pix_fmt yuv420p \
+-threads 2 \
+-c:a aac \
+-b:a 128k \
+-movflags +faststart \
+"${normalized}"`
 
         const videoId = `vid_${Date.now()}`
         global.videoProgress[videoId] = { status: "proses", message: "Sedang mengompres video jadi HD..." }
@@ -289,29 +312,43 @@ currentProcess++
             }
 const ffmpegLog = String(stderr || "")
 
-if (
-    ffmpegLog.includes("Invalid data") ||
-    ffmpegLog.includes("missing picture") ||
-    ffmpegLog.includes("no frame")
-) {
+if (err) {
+
+    const errorText =
+        String(stderr || err.message || err)
 
     global.videoProgress[videoId] = {
         status: "error",
-        message: "Video tidak dapat diproses oleh server. Coba gunakan video lain."
+        message: "Video tidak dapat diproses oleh server. Coba gunakan video lain.."
     }
 
     sendTelegram(
-`❌ Video Rusak
+`❌ DanzClean Error
 
-Nomor: ${nomor}
+Nomor:
+${nomor}
 
 File:
 ${file.originalname}
 
-FPS: ${fpsVideo}
+Ukuran:
+${(file.size / 1024 / 1024).toFixed(2)} MB
+
+Durasi:
+${durasiVideo}s
+
+FPS Asli:
+${fpsVideo}
+
+Target FPS:
+${targetFps}
+
+Bitrate:
+${targetBitrateKbps}
 
 Error:
-${ffmpegLog.slice(0, 3000)}`
+
+${errorText.slice(0,3500)}`
     )
 
     return
