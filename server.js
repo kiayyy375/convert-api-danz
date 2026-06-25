@@ -368,13 +368,19 @@ ${errorText.slice(-3500)}`
 
             
             global.results.push({
-                url: resultUrl,
-                nomor: nomor,
-                time: Date.now()
-            });
+    url: resultUrl,
+    nomor: nomor,
+    time: Date.now()
+});
 
-            console.log(`[DanzClean Sukses]: Video ${outputFilename} matang & siap dikirim oleh main.js!`);
-        });
+setTimeout(() => {
+    if (fs.existsSync(normalized)) {
+        fs.unlink(normalized, () => {});
+        console.log(`[AUTO DELETE] ${outputFilename}`);
+    }
+}, 5 * 60 * 1000); 
+
+console.log(`[DanzClean Sukses]: Video ${outputFilename} matang & siap dikirim oleh main.js!`);
 
     } catch (e) {
         if (currentProcess > 0) {
