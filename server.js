@@ -382,7 +382,9 @@ setTimeout(() => {
 
 console.log(`[DanzClean Sukses]: Video ${outputFilename} matang & siap dikirim oleh main.js!`);
 
-    } catch (e) {
+}); 
+
+} catch (e) {
         if (currentProcess > 0) {
             currentProcess--
         }
