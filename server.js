@@ -245,24 +245,119 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
             writeStream.end();
             fs.rmdirSync(chunkDir); 
 
-            const form = new FormData();
-            form.append("video", fs.createReadStream(finalPath), {
-                filename: filename,
-                contentType: "video/mp4"
+            // 1. Validasi Anggota Grup via GitHub API
+            const github = await axios.get(
+                "https://api.github.com/repos/xyron11/cekverif/contents/verify.json",
+                {
+                    headers: {
+                        Authorization: "token " + process.env.GITHUB_TOKEN,
+                        "Cache-Control": "no-cache"
+                    }
+                }
+            );
+
+            const content = Buffer.from(github.data.content, "base64").toString("utf8");
+            const members = JSON.parse(content);
+
+            if (!members.includes(nomor)) {
+                try {
+                    const realtime = await axios.get(
+                        "https://raw.githubusercontent.com/xyron11/cekverif/main/verify.json?nocache=" + Date.now(),
+                        { headers: { "Cache-Control": "no-cache" }, timeout: 5000 }
+                    );
+                    const realtimeMembers = realtime.data || [];
+                    if (!realtimeMembers.includes(nomor)) {
+                        if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+                        return res.json({
+                            status: false,
+                            error: "Nomor tidak ada di grup mohon nomor yang anda pakai harus masuk group dulu, bisa anda pencet tombol join group untuk masuk ke group",
+                            join: "https://chat.whatsapp.com/BVtogIjS1hAD0qOMhJ3f6a"
+                        });
+                    }
+                } catch {
+                    if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+                    return res.json({
+                        status: false,
+                        error: "Nomor tidak ada di grup mohon nomor yang anda pakai harus masuk group dulu, bisa anda pencet tombol join group untuk masuk ke group",
+                        join: "https://chat.whatsapp.com/BVtogIjS1hAD0qOMhJ3f6a"
+                    });
+                }
+            }
+
+            // 2. Siapkan File Output Rendering
+            const outputFilename = `${Date.now()}_HD_DanzClean.mp4`;
+            const normalized = path.join(__dirname, "public", outputFilename);
+            const durasiVideo = await dapatkanDurasiVideo(finalPath);
+            
+            // 3. Ambil Nilai FPS Video
+            const fpsVideo = await new Promise((resolve) => {
+                exec(`ffprobe -v 0 -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 "${finalPath}"`, (err, stdout) => {
+                    if (err) return resolve(30);
+                    const rate = stdout.trim().split("/");
+                    if (rate.length === 2) {
+                        resolve(Math.round(Number(rate[0]) / Number(rate[1])));
+                    } else {
+                        resolve(30);
+                    }
+                });
             });
-            form.append("nomor", nomor);
 
-            const tokenTokenan = `Bearer ${Buffer.from("DANZZ").toString("base64")}`;
-            const targetPort = process.env.PORT || 3000;
+            const targetFps = fpsVideo > 60 ? fpsVideo : 60;
 
-            const responUtama = await axios.post(`http://127.0.0.1:${targetPort}/upload`, form, {
-    headers: { ...form.getHeaders(), "authorization": tokenTokenan },
-    maxContentLength: Infinity, maxBodyLength: Infinity
-});
+            // 4. Manajemen Antrean Proses Render
+            if (currentProcess >= MAX_PROCESS) {
+                await new Promise(resolve => { waitingQueue.push(resolve); });
+            }
+            currentProcess++;
 
+            // 5. Perintah FFmpeg Hemat RAM (Preset veryfast & rc-lookahead dikunci)
+            const perintahFfmpeg = `ffmpeg -err_detect ignore_err -fflags +discardcorrupt -analyzeduration 50M -probesize 50M -i "${finalPath}" -vf "scale='if(gte(iw,ih),-2,720)':'if(gte(iw,ih),720,-2)',hqdn3d=0.5:0.5:1.0:1.0,unsharp=3:3:0.4:3:3:0.4" -r ${targetFps} -c:v libx264 -preset veryfast -rc-lookahead 10 -crf 18 -aq-mode 3 -colorspace bt709 -color_trc bt709 -color_primaries bt709 -maxrate 12M -bufsize 12M -pix_fmt yuv420p -threads 2 -c:a aac -b:a 128k -movflags +faststart "${normalized}"`;
 
-            if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
-            return res.json(responUtama.data);
+            const videoId = `vid_${Date.now()}`;
+            global.videoProgress[videoId] = { status: "proses", message: "Sedang mengompres video jadi HD..." };
+
+            // Berikan respons sukses awal ke frontend untuk mengaktifkan pemantauan progress
+            res.json({
+                status: true,
+                id: videoId,
+                message: "Video berhasil dijahit! Memulai render HD..."
+            });
+
+            // Eksekusi FFmpeg di latar belakang (Background Process)
+            exec(perintahFfmpeg, { maxBuffer: 1024 * 1024 * 100 }, (err, stdout, stderr) => {
+                currentProcess--;
+                if (waitingQueue.length > 0) {
+                    const next = waitingQueue.shift();
+                    next();
+                }
+
+                if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+
+                const sukses = fs.existsSync(normalized) && fs.statSync(normalized).size > 500 * 1024;
+
+                if (err && !sukses) {
+                    const errorText = String(stderr || err.message || err);
+                    global.videoProgress[videoId] = { status: "error", message: "Video tidak dapat diproses oleh server." };
+                    sendTelegram(`❌ DanzClean Error\n\nNomor:\n${nomor}\n\nFile:\n${filename}\n\nError:\n${errorText.slice(-3500)}`);
+                    return;
+                }
+
+                const domainPenyedia = req.get("host");
+                const protocolPenyedia = req.protocol;
+                const resultUrl = `${protocolPenyedia}://${domainPenyedia}/video/${outputFilename}`;
+
+                global.videoProgress[videoId] = { status: "selesai", message: "Video HD Matang!", url: resultUrl };
+                global.results.push({ url: resultUrl, nomor: nomor, time: Date.now() });
+
+                // Hapus file matang secara otomatis setelah 5 menit
+                setTimeout(() => {
+                    if (fs.existsSync(normalized)) {
+                        fs.unlink(normalized, () => {});
+                        console.log(`[AUTO DELETE] ${outputFilename}`);
+                    }
+                }, 5 * 60 * 1000);
+            });
+            return;
         }
 
         return res.json({ status: true, message: `Chunk ${chunkIndex} sukses disimpan.` });
@@ -272,6 +367,7 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
         return res.json({ status: false, error: "Gagal menyatukan potongan file: " + error.message });
     }
 });
+
 
 
 app.use((err, req, res, next) => {
