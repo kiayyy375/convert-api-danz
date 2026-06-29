@@ -65,213 +65,72 @@ app.get("/results", (req, res) => {
 //jsjsjzjjdjd
 app.post("/api/upload", upload.single("video"), async (req, res) => {
     const file = req.file
-    const nomor = req.body.nomor
+    const { nomor } = req.body
 
     try {
-        if (!file) return res.json({ status: false, error: "File kosong" })
-        if (!nomor) {
+        if (!file) return res.json({ status: false, error: "File video kosong" })
+
+        const tokenHeader = req.headers["authorization"]
+        const tokenDiharapkan = `Bearer ${Buffer.from("DANZZ").toString("base64")}`
+        if (!tokenHeader || tokenHeader !== tokenDiharapkan) {
             if (fs.existsSync(file.path)) fs.unlinkSync(file.path)
-            return res.json({ status: false, error: "Nomor kosong" })
+            return res.json({ status: false, error: "Akses tidak sah!" })
         }
 
-        const form = new FormData()
-        form.append("video", fs.createReadStream(file.path), {
-            filename: file.originalname,
-            contentType: file.mimetype
-        })
-        form.append("nomor", nomor)
+        const videoId = Date.now().toString()
+        global.videoProgress[videoId] = { status: "proses", message: "Mengantre video..." }
 
-        const tokenTokenan = `Bearer ${Buffer.from("DANZZ").toString("base64")}`;
+        res.json({ status: true, id: videoId })
 
-
-        const targetPort = process.env.PORT || 3000; 
-
-
-        const responUtama = await axios.post(`http://127.0.0.1:${targetPort}/upload`, form, {
-            headers: {
-                ...form.getHeaders(),
-                "authorization": tokenTokenan
-            },
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity
-        })
-
-        if (fs.existsSync(file.path)) fs.unlinkSync(file.path)
-        return res.json(responUtama.data)
-
-    } catch (error) {
-        if (file && fs.existsSync(file.path)) fs.unlinkSync(file.path)
-        console.log("[DanzClean Proxy Error]: ", error.message)
-        return res.json({ status: false, error: "Gagal menjembatani request: " + error.message })
-    }
-})
-//=======
-const dapatkanDurasiVideo = (filePath) => {
-
-
-    return new Promise((resolve, reject) => {
-        exec(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nocreval=1 "${filePath}"`, (err, stdout) => {
-            if (err) return resolve(30);
-            const durasi = parseFloat(stdout.trim());
-            resolve(isNaN(durasi) ? 30 : durasi);
-        });
-    });
-};
-
-let currentProcess = 0
-const MAX_PROCESS = 2
-const waitingQueue = []
-
-app.post("/upload", upload.single("video"), async (req, res) => {
-    const authHeader = req.headers.authorization;
-    const tokenDiharapkan = `Bearer ${Buffer.from("DANZZ").toString("base64")}`;
-
-    if (!authHeader || authHeader !== tokenDiharapkan) {
-        return res.status(403).json({ status: false, error: "Forbidden" })
-    }
-
-    const file = req.file
-    const nomor = req.body.nomor
-
-    try {
-        if (!file) return res.json({ status: false, error: "File kosong" })
-        if (!nomor) {
-            fs.unlinkSync(file.path)
-            return res.json({ status: false, error: "Nomor kosong" })
-        }
-
-const github = await axios.get(
-  "https://api.github.com/repos/xyron11/cekverif/contents/verify.json",
-  {
-    headers: {
-      Authorization: "token " + process.env.GITHUB_TOKEN,
-      "Cache-Control": "no-cache"
-    }
-  }
-)
-
-const content = Buffer.from(
-  github.data.content,
-  "base64"
-).toString("utf8")
-
-const members = JSON.parse(content)
-
-if (!members.includes(nomor)) {
-
-    try {
-
-        const realtime = await axios.get(
-            "https://raw.githubusercontent.com/xyron11/cekverif/main/verify.json?nocache=" + Date.now(),
-            {
-                headers: {
-                    "Cache-Control": "no-cache"
-                },
-                timeout: 5000
-            }
-        )
-
-        const realtimeMembers = realtime.data || []
-
-        if (!realtimeMembers.includes(nomor)) {
-
-            fs.unlinkSync(file.path)
-
-            return res.json({
-                status: false,
-                error: "Nomor tidak ada di grup mohon nomor yang anda pakai harus masuk group dulu, bisa anda pencet tombol join group untuk masuk ke group",
-                join: "https://chat.whatsapp.com/BVtogIjS1hAD0qOMhJ3f6a"
-            })
-
-        }
-
-    } catch {
-
-        fs.unlinkSync(file.path)
-
-        return res.json({
-            status: false,
-            error: "Nomor tidak ada di grup mohon nomor yang anda pakai harus masuk group dulu, bisa anda pencet tombol join group untuk masuk ke group",
-            join: "https://chat.whatsapp.com/BVtogIjS1hAD0qOMhJ3f6a"
-        })
-
-    }
-}
-
-        const ext = file.originalname.split(".").pop().toLowerCase()
-        const allow = ["mp4", "mov", "mkv", "avi", "webm", "m4v"]
-
-        if (!allow.includes(ext)) {
-            fs.unlinkSync(file.path)
-            return res.json({ status: false, error: "Hanya file video" })
-        }
-
+        const durasi = await dapatkanDurasiVideo(file.path)
         const outputFilename = `${Date.now()}_HD_DanzClean.mp4`
         const normalized = path.join(__dirname, "public", outputFilename)
-        
-        const durasiVideo = await dapatkanDurasiVideo(file.path);
-        
-        let bitrateIdeal = Math.floor(113246208 / durasiVideo); 
-        
-        if (bitrateIdeal > 4000000) bitrateIdeal = 4000000; 
-        if (bitrateIdeal < 1200000) bitrateIdeal = 1200000; 
-        
-        const targetBitrateKbps = `${Math.floor(bitrateIdeal / 1000)}k`;
 
-        console.log(`[DanzClean] Memproses video dengan target bitrate: ${targetBitrateKbps}`);
-const fpsVideo = await new Promise((resolve) => {
+        const fpsVideo = await new Promise((resolve) => {
+            exec(
+                `ffprobe -v 0 -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 "${file.path}"`,
+                (err, stdout) => {
+                    if (err) return resolve(30)
+                    const hasilClean = stdout.trim()
+                    if (!hasilClean) return resolve(30)
+                    
+                    const rate = hasilClean.split("/")
+                    if (rate.length === 2) {
+                        const atas = Number(rate[0])
+                        const bawah = Number(rate[1])
+                        if (bawah === 0 || isNaN(atas) || isNaN(bawah)) return resolve(30)
+                        resolve(Math.round(atas / bawah))
+                    } else {
+                        const angkaSingel = Number(hasilClean)
+                        resolve(isNaN(angkaSingel) ? 30 : Math.round(angkaSingel))
+                    }
+                }
+            )
+        })
 
-    exec(
-        `ffprobe -v 0 -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 "${file.path}"`,
-        (err, stdout) => {
+        const targetFps = (isNaN(fpsVideo) || fpsVideo > 60) ? 60 : fpsVideo
 
-            if (err) return resolve(30)
-
-            const rate = stdout.trim().split("/")
-
-            if (rate.length === 2) {
-
-                resolve(
-                    Math.round(
-                        Number(rate[0]) / Number(rate[1])
-                    )
-                )
-
-            } else {
-                resolve(30)
-            }
-
+        if (currentProcess >= MAX_PROCESS) {
+            await new Promise(resolve => {
+                waitingQueue.push(resolve)
+            })
         }
-    )
 
-})
-
-const targetFps =
-    fpsVideo > 60
-        ? fpsVideo
-        : 60
-
-if (currentProcess >= MAX_PROCESS) {
-    await new Promise(resolve => {
-        waitingQueue.push(resolve)
-    })
-}
-
-currentProcess++
-
+        currentProcess++
 
         const perintahFfmpeg =
 `ffmpeg \
 -err_detect ignore_err \
 -fflags +discardcorrupt \
--analyzeduration 100M \
--probesize 100M \
+-analyzeduration 50M \
+-probesize 50M \
 -i "${file.path}" \
--vf "scale='if(gte(iw,ih),-2,720)':'if(gte(iw,ih),720,-2)',hqdn3d=1.0:1.0:2.0:2.0,unsharp=3:3:0.4:3:3:0.4" \
+-vf "scale='if(gte(iw,ih),-2,720)':'if(gte(iw,ih),720,-2)',hqdn3d=0.5:0.5:1.0:1.0,unsharp=3:3:0.4:3:3:0.4" \
 -r ${targetFps} \
 -c:v libx264 \
--preset faster \
--crf 17 \
+-preset veryfast \
+-rc-lookahead 10 \
+-crf 18 \
 -aq-mode 3 \
 -colorspace bt709 \
 -color_trc bt709 \
@@ -285,48 +144,29 @@ currentProcess++
 -movflags +faststart \
 "${normalized}"`
 
-        const videoId = `vid_${Date.now()}`
-        global.videoProgress[videoId] = { status: "proses", message: "Sedang mengompres video jadi HD..." }
-
-
-        res.json({
-            status: true,
-            id: videoId,
-            message: "Video diterima server Railway! Memulai render..."
-        });
-
-
-        exec(
-    perintahFfmpeg,
-    { maxBuffer: 1024 * 1024 * 100 },
-    (err, stdout, stderr) => {
-            currentProcess--;
-
+        exec(perintahFfmpeg, async (err, stdout, stderr) => {
+            if (currentProcess > 0) currentProcess--
             if (waitingQueue.length > 0) {
-                const next = waitingQueue.shift();
-                next();
+                const next = waitingQueue.shift()
+                next()
             }
 
-            if (fs.existsSync(file.path)) {
-                fs.unlinkSync(file.path);
-            }
-const ffmpegLog = String(stderr || "")
+            if (fs.existsSync(file.path)) fs.unlinkSync(file.path)
 
-const sukses =
-    fs.existsSync(normalized) &&
-    fs.statSync(normalized).size > 500 * 1024
+            if (err) {
+                global.videoProgress[videoId] = { status: "error", message: "Gagal merender video." }
+                
+                const formatSize = (bytes) => {
+                    if (bytes === 0) return '0 Bytes';
+                    const k = 1024;
+                    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                };
 
-if (err && !sukses) {
-
-    const errorText =
-        String(stderr || err.message || err)
-
-    global.videoProgress[videoId] = {
-        status: "error",
-        message: "Video tidak dapat diproses oleh server."
-    }
-
-    sendTelegram(
+                const errorText = err.message + "\n" + (stderr || "");
+                
+                await sendTelegram(
 `❌ DanzClean Error
 
 Nomor:
@@ -336,10 +176,10 @@ File:
 ${file.originalname}
 
 Ukuran:
-${(file.size / 1024 / 1024).toFixed(2)} MB
+${formatSize(file.size)}
 
 Durasi:
-${durasiVideo}s
+${durasi ? durasi + "s" : "Gagal Hitung"}
 
 FPS Asli:
 ${fpsVideo}
@@ -348,64 +188,90 @@ Target FPS:
 ${targetFps}
 
 Bitrate:
-${targetBitrateKbps}
+${Math.round((file.size * 8) / (durasi || 1) / 1000)}k
 
 Error:
-
 ${errorText.slice(-3500)}`
-    )
-
-    return
-}
-
+                )
+                return
+            }
 
             const domainPenyedia = req.get("host");
             const protocolPenyedia = req.protocol;
             const resultUrl = `${protocolPenyedia}://${domainPenyedia}/video/${outputFilename}`;
 
-            
             global.videoProgress[videoId] = { status: "selesai", message: "Video HD Matang!", url: resultUrl }
+            global.results.push({ url: resultUrl, nomor: nomor, time: Date.now() });
 
-            
-            global.results.push({
-    url: resultUrl,
-    nomor: nomor,
-    time: Date.now()
-});
+            setTimeout(() => {
+                if (fs.existsSync(normalized)) fs.unlink(normalized, () => {});
+            }, 5 * 60 * 1000); 
+        })
 
-setTimeout(() => {
-    if (fs.existsSync(normalized)) {
-        fs.unlink(normalized, () => {});
-        console.log(`[AUTO DELETE] ${outputFilename}`);
-    }
-}, 5 * 60 * 1000); 
-
-console.log(`[DanzClean Sukses]: Video ${outputFilename} matang & siap dikirim oleh main.js!`);
-
-}); 
-
-} catch (e) {
-        if (currentProcess > 0) {
-            currentProcess--
-        }
-
+    } catch (error) {
+        if (currentProcess > 0) currentProcess--
         if (waitingQueue.length > 0) {
             const next = waitingQueue.shift()
             next()
         }
-        
-        console.log("[DanzClean Catch Error]:", e.message)
         if (file && fs.existsSync(file.path)) fs.unlinkSync(file.path)
-        
-
-        if (!res.headersSent) {
-            res.json({
-                status: false,
-                error: "Gagal memproses HD video: " + e.message
-            })
-        }
+        if (!res.headersSent) res.json({ status: false, error: "Gagal memproses HD video: " + error.message })
     }
 })
+
+app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
+    const fileChunk = req.file;
+    const { chunkIndex, totalChunks, chunkToken, filename, nomor } = req.body;
+
+    try {
+        if (!fileChunk) return res.json({ status: false, error: "Potongan file kosong" });
+
+        const chunkDir = path.join(__dirname, "uploads", chunkToken);
+        if (!fs.existsSync(chunkDir)) fs.mkdirSync(chunkDir);
+
+        const chunkPath = path.join(chunkDir, `chunk_${chunkIndex}`);
+        fs.renameSync(fileChunk.path, chunkPath);
+
+        if (parseInt(chunkIndex) === parseInt(totalChunks) - 1) {
+            const finalPath = path.join(__dirname, "uploads", `${Date.now()}_${filename}`);
+            const writeStream = fs.createWriteStream(finalPath);
+
+            for (let i = 0; i < totalChunks; i++) {
+                const targetChunkPath = path.join(chunkDir, `chunk_${i}`);
+                const buffer = fs.readFileSync(targetChunkPath);
+                writeStream.write(buffer);
+                fs.unlinkSync(targetChunkPath); 
+            }
+            writeStream.end();
+            fs.rmdirSync(chunkDir); 
+
+            const form = new FormData();
+            form.append("video", fs.createReadStream(finalPath), {
+                filename: filename,
+                contentType: "video/mp4"
+            });
+            form.append("nomor", nomor);
+
+            const tokenTokenan = `Bearer ${Buffer.from("DANZZ").toString("base64")}`;
+            const targetPort = process.env.PORT || 3000;
+
+            const responUtama = await axios.post(`http://127.0.0.1:${targetPort}/api/upload`, form, {
+                headers: { ...form.getHeaders(), "authorization": tokenTokenan },
+                maxContentLength: Infinity, maxBodyLength: Infinity
+            });
+
+            if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+            return res.json(responUtama.data);
+        }
+
+        return res.json({ status: true, message: `Chunk ${chunkIndex} sukses disimpan.` });
+
+    } catch (error) {
+        console.log("[DanzClean Chunk Error]: ", error.message);
+        return res.json({ status: false, error: "Gagal menyatukan potongan file: " + error.message });
+    }
+});
+
 
 app.use((err, req, res, next) => {
     res.status(500).json({ status: false, error: "Internal Server Error" })
