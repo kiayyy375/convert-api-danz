@@ -1,8 +1,11 @@
+FROM node:22
+
+RUN apt update && apt install -y ffmpeg
+
 WORKDIR /app
 
 COPY . .
 
-# Paksa install modul tus sebelum menjalankan instalasi utama
 RUN npm install @tus/server @tus/file-datastore
 
 RUN npm install
