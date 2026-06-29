@@ -219,6 +219,7 @@ ${errorText.slice(-3500)}`
     }
 })
 
+
 app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
     const fileChunk = req.file;
     const { chunkIndex, totalChunks, chunkToken, filename, nomor } = req.body;
@@ -245,33 +246,68 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
             writeStream.end();
             fs.rmdirSync(chunkDir); 
 
-            // 1. LANGSUNG kirim status sukses ke frontend biar 49%-nya langsung lolos & tidak timeout!
-            res.json({ status: true, message: "File berhasil disatukan, memproses HD..." });
+            // 1. Buat ID Progress unik agar frontend bisa melacak status rendering
+            const videoId = `vid_${Date.now()}`;
+            global.videoProgress[videoId] = { status: "proses", message: "Video diterima! Menghubungi server..." };
 
-            // 2. Jalankan pengiriman data ke rute upload utama di background server tanpa membuat user menunggu
+            // 2. LANGSUNG kirim status sukses ke frontend (User langsung lolos dari 49%)
+            res.json({
+                status: true,
+                id: videoId,
+                message: "Video berhasil dijahit! Memulai pemrosesan HD..."
+            });
+
+            // 3. Jalankan logika pengecekan grup di background secara mandiri (Tanpa Axios Internal)
             setImmediate(async () => {
                 try {
-                    const form = new FormData();
-                    form.append("video", fs.createReadStream(finalPath), {
-                        filename: filename,
-                        contentType: "video/mp4"
-                    });
-                    form.append("nomor", nomor);
+                    // Cek database member di GitHub
+                    const github = await axios.get(
+                        "https://api.github.com/repos/xyron11/cekverif/contents/verify.json",
+                        {
+                            headers: {
+                                Authorization: "token " + process.env.GITHUB_TOKEN,
+                                "Cache-Control": "no-cache"
+                            }
+                        }
+                    );
 
-                    const tokenTokenan = `Bearer ${Buffer.from("DANZZ").toString("base64")}`;
-                    const targetPort = process.env.PORT || 3000;
+                    const content = Buffer.from(github.data.content, "base64").toString("utf8");
+                    const members = JSON.parse(content);
 
-                    // Mengirim ke endpoint lokal /upload (pastikan rute utama kamu tipenya app.post("/upload") atau app.post("/api/upload"))
-                    await axios.post(`http://127.0.0.1:${targetPort}/upload`, form, {
-                        headers: { ...form.getHeaders(), "authorization": tokenTokenan },
-                        maxContentLength: Infinity, 
-                        maxBodyLength: Infinity
-                    });
+                    // Jika nomor tidak ada di grup, batalkan proses dan hapus file
+                    if (!members.includes(nomor)) {
+                        if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+                        global.videoProgress[videoId] = { 
+                            status: "error", 
+                            message: "Nomor tidak terdaftar di grup DanzClean!" 
+                        };
+                        return;
+                    }
 
+                    // Jika nomor lolos verifikasi grup, panggil rute upload utama secara internal lewat fungsi bawaan Express
+                    // Trik ini memicu rute app.post("/upload") tanpa perlu melakukan koneksi jaringan HTTP Axios!
+                    req.file = {
+                        path: finalPath,
+                        originalname: filename,
+                        filename: path.basename(finalPath),
+                        mimetype: "video/mp4"
+                    };
+                    req.body.nomor = nomor;
+                    req.body.isFromChunk = true; // Flag penanda internal
+
+                    // Ambil referensi fungsi rute utama kamu
+                    const ruteUploadUtama = app._router.stack.find(s => s.route && s.route.path === "/upload");
+                    if (ruteUploadUtama) {
+                        // Jalankan fungsi rendering bawaan milik rute /upload kamu
+                        ruteUploadUtama.handle(req, res, () => {});
+                    } else {
+                        console.log("[DanzClean Error]: Rute /upload tidak ditemukan");
+                    }
+
+                } catch (bgError) {
+                    console.log("[DanzClean Background Error]:", bgError.message);
                     if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
-                } catch (err) {
-                    console.log("[DanzClean Background Post Error]:", err.message);
-                    if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+                    global.videoProgress[videoId] = { status: "error", message: "Gagal verifikasi grup: " + bgError.message };
                 }
             });
             return;
@@ -284,7 +320,6 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
         return res.json({ status: false, error: "Gagal menyatukan potongan file: " + error.message });
     }
 });
-
 
 
 app.use((err, req, res, next) => {
