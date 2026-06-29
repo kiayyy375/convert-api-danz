@@ -51,27 +51,30 @@ app.get("/", (req, res) => {
 app.get("/api/progress", (req, res) => {
     const id = req.query.id
     if (!id || !global.videoProgress[id]) {
-        return res.json({ status: false, error: "ID Kemajuan tidak valid atau kedaluwarsa" })
+        return res.json({ status: false, progress: 0, message: "ID tidak ditemukan" })
     }
-    res.json({ status: true, ...global.videoProgress[id] })
+    res.json(global.videoProgress[id])
 })
 
-app.get("/api/results", (req, res) => {
-    res.json({ status: true, data: global.results })
+app.get("/results", (req, res) => {
+    const data = [...global.results]
+    global.results = []
+    res.json(data)
 })
 
-const waitingQueue = [];
-let currentProcess = 0;
-const MAX_PROCESS = 1; 
-
-function dapatkanDurasiVideo(filePath) {
-    return new Promise((resolve) => {
+const dapatkanDurasiVideo = (filePath) => {
+    return new Promise((resolve, reject) => {
         exec(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`, (err, stdout) => {
-            if (err) return resolve(0);
-            resolve(parseFloat(stdout.trim()) || 0);
+            if (err) return resolve(30);
+            const durasi = parseFloat(stdout.trim());
+            resolve(isNaN(durasi) ? 30 : durasi);
         });
     });
-}
+};
+
+let currentProcess = 0
+const MAX_PROCESS = 2
+const waitingQueue = []
 
 app.post("/upload", upload.single("video"), async (req, res) => {
     const fileVideo = req.file;
@@ -90,32 +93,28 @@ app.post("/upload", upload.single("video"), async (req, res) => {
     };
 
     try {
-        console.log(`[LOG] Memulai verifikasi rute utama untuk nomor: ${nomorWa}`);
+        console.log(`[LOG] Memproses rute utama untuk nomor: ${nomorWa}`);
         
         if (!process.env.GITHUB_TOKEN) {
-            console.log("[LOG ERROR] GITHUB_TOKEN tidak ditemukan di environment");
             return kirimRespon({ status: false, error: "GITHUB_TOKEN is required" });
         }
         if (!fileVideo) {
-            console.log("[LOG ERROR] File video kosong");
-            return kirimRespon({ status: false, error: "File video kosong masee" });
+            return kirimRespon({ status: false, error: "File kosong" });
         }
         if (!nomorWa) {
-            console.log("[LOG ERROR] Nomor WA kosong");
             if (fs.existsSync(fileVideo.path)) fs.unlinkSync(fileVideo.path);
-            return kirimRespon({ status: false, error: "Nomor WhatsApp kosong masee" });
+            return kirimRespon({ status: false, error: "Nomor kosong" });
         }
 
         const tokenAuth = req.headers.authorization;
         const tokenValid = `Bearer ${Buffer.from("DANZZ").toString("base64")}`;
 
         if (!isFromChunk && (!tokenAuth || tokenAuth !== tokenValid)) {
-            console.log("[LOG ERROR] Token authorization salah atau akses ilegal");
             if (fs.existsSync(fileVideo.path)) fs.unlinkSync(fileVideo.path);
-            return kirimRespon({ status: false, error: "Akses ilegal bro." });
+            return kirimRespon({ status: false, error: "Forbidden" });
         }
 
-        console.log("[LOG] Menghubungi API GitHub untuk cek grup...");
+        console.log("[LOG] Sinkronisasi verifikasi grup di GitHub...");
         const github = await axios.get(
             "https://api.github.com/repos/xyron11/cekverif/contents/verify.json",
             {
@@ -130,7 +129,6 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         const members = JSON.parse(content);
 
         if (!members.includes(nomorWa)) {
-            console.log(`[LOG] Nomor ${nomorWa} tidak ada di primary grup GitHub, mencoba cek realtime raw...`);
             try {
                 const realtime = await axios.get(
                     "https://raw.githubusercontent.com/xyron11/cekverif/main/verify.json?nocache=" + Date.now(),
@@ -138,7 +136,6 @@ app.post("/upload", upload.single("video"), async (req, res) => {
                 );
                 const realtimeMembers = realtime.data || [];
                 if (!realtimeMembers.includes(nomorWa)) {
-                    console.log(`[LOG KEPUTUSAN] Nomor ${nomorWa} RESMI TIDAK TERDAFTAR DI GRUP.`);
                     if (fs.existsSync(fileVideo.path)) fs.unlinkSync(fileVideo.path);
                     return kirimRespon({
                         status: false,
@@ -146,8 +143,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
                         join: "https://chat.whatsapp.com/BVtogIjS1hAD0qOMhJ3f6a"
                     });
                 }
-            } catch (errDb) {
-                console.log("[LOG ERROR] Gagal mengambil backup realtime raw GitHub:", errDb.message);
+            } catch {
                 if (fs.existsSync(fileVideo.path)) fs.unlinkSync(fileVideo.path);
                 return kirimRespon({
                     status: false,
@@ -157,12 +153,25 @@ app.post("/upload", upload.single("video"), async (req, res) => {
             }
         }
 
-        console.log(`[LOG SUKSES] Nomor ${nomorWa} lolos verifikasi grup!`);
+        const ext = fileVideo.originalname.split(".").pop().toLowerCase();
+        const allow = [["mp4", "mov", "mkv", "avi", "webm", "m4v"]];
+        if (!allow.includes(ext)) {
+            if (fs.existsSync(fileVideo.path)) fs.unlinkSync(fileVideo.path);
+            return kirimRespon({ status: false, error: "Hanya file video" });
+        }
+
+        console.log(`[LOG SUKSES] Nomor ${nomorWa} tervalidasi masuk grup.`);
 
         const outputFilename = `${Date.now()}_HD_DanzClean.mp4`;
         const normalized = path.join(__dirname, "public", outputFilename);
         
         const durasiVideo = await dapatkanDurasiVideo(fileVideo.path);
+        let bitrateIdeal = Math.floor(113246208 / durasiVideo);
+        if (bitrateIdeal > 4000000) bitrateIdeal = 4000000;
+        if (bitrateIdeal < 1200000) bitrateIdeal = 1200000;
+        const targetBitrateKbps = `${Math.floor(bitrateIdeal / 1000)}k`;
+
+        console.log(`[LOG FFMPEG] Target Bitrate Kembalian: ${targetBitrateKbps}`);
         
         const fpsVideo = await new Promise((resolve) => {
             exec(`ffprobe -v 0 -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 "${fileVideo.path}"`, (err, stdout) => {
@@ -179,30 +188,29 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         const targetFps = fpsVideo > 60 ? fpsVideo : 60;
 
         if (currentProcess >= MAX_PROCESS) {
-            console.log(`[LOG ANTRIAN] Server penuh. Memasukkan video ke dalam antrean...`);
+            console.log("[LOG ANTRIAN] Proses penuh, memasukkan ke antrean...");
             await new Promise(resolve => { waitingQueue.push(resolve); });
         }
         currentProcess++;
 
-        const perintahFfmpeg = `ffmpeg -err_detect ignore_err -fflags +discardcorrupt -analyzeduration 50M -probesize 50M -i "${fileVideo.path}" -vf "scale='if(gte(iw,ih),-2,720)':'if(gte(iw,ih),720,-2)',hqdn3d=0.5:0.5:1.0:1.0,unsharp=3:3:0.4:3:3:0.4" -r ${targetFps} -c:v libx264 -preset veryfast -rc-lookahead 10 -crf 18 -aq-mode 3 -colorspace bt709 -color_trc bt709 -color_primaries bt709 -maxrate 12M -bufsize 12M -pix_fmt yuv420p -threads 2 -c:a aac -b:a 128k -movflags +faststart "${normalized}"`;
+        const perintahFfmpeg = `ffmpeg -err_detect ignore_err -fflags +discardcorrupt -analyzeduration 100M -probesize 100M -i "${fileVideo.path}" -vf "scale='if(gte(iw,ih),-2,720)':'if(gte(iw,ih),720,-2)',hqdn3d=1.0:1.0:2.0:2.0,unsharp=3:3:0.4:3:3:0.4" -r ${targetFps} -c:v libx264 -preset faster -crf 17 -aq-mode 3 -colorspace bt709 -color_trc bt709 -color_primaries bt709 -maxrate 12M -bufsize 12M -pix_fmt yuv420p -threads 2 -c:a aac -b:a 128k -movflags +faststart "${normalized}"`;
 
         const videoId = req.body.videoIdFlag || `vid_${Date.now()}`;
         global.videoProgress[videoId] = { status: "proses", message: "Sedang mengompres video jadi HD..." };
 
-        console.log(`[LOG FFMPEG] Memulai eksekusi render video ke HD (${targetFps} FPS)...`);
+        console.log("[LOG FFMPEG] Memulai render cepat FFmpeg...");
 
         if (!isFromChunk) {
             res.json({
                 status: true,
                 id: videoId,
-                message: "Video aman! Memulai render HD..."
+                message: "Video diterima server Railway! Memulai render..."
             });
         }
 
         exec(perintahFfmpeg, { maxBuffer: 1024 * 1024 * 100 }, (err, stdout, stderr) => {
             currentProcess--;
             if (waitingQueue.length > 0) {
-                console.log("[LOG ANTRIAN] Mengeluarkan slot antrean berikutnya...");
                 const next = waitingQueue.shift();
                 next();
             }
@@ -213,9 +221,9 @@ app.post("/upload", upload.single("video"), async (req, res) => {
 
             if (err && !sukses) {
                 const errorText = String(stderr || err.message || err);
-                console.log("[LOG ERROR] FFmpeg gagal merender video:", errorText.slice(-200));
+                console.log("[LOG ERROR] Eksekusi FFmpeg bermasalah.");
                 global.videoProgress[videoId] = { status: "error", message: "Video tidak dapat diproses oleh server." };
-                sendTelegram(`❌ DanzClean Error\n\nNomor:\n${nomorWa}\n\nFile:\n${fileVideo.originalname}\n\nError:\n${errorText.slice(-3500)}`);
+                sendTelegram(`❌ DanzClean Error Nomor: ${nomorWa} File: ${fileVideo.originalname} Ukuran: ${(fileVideo.size / 1024 / 1024).toFixed(2)} MB Durasi: ${durasiVideo}s FPS Asli: ${fpsVideo} Target FPS: ${targetFps} Bitrate: ${targetBitrateKbps} Error: ${errorText.slice(-3500)}`);
                 return;
             }
 
@@ -223,7 +231,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
             const protocolPenyedia = req.protocol;
             const resultUrl = `${protocolPenyedia}://${domainPenyedia}/video/${outputFilename}`;
 
-            console.log(`[LOG BERHASIL MATANG] Hasil video siap di-download: ${resultUrl}`);
+            console.log(`[LOG SUKSES] Hasil matang siap ambil: ${resultUrl}`);
 
             global.videoProgress[videoId] = { status: "selesai", message: "Video HD Matang!", url: resultUrl };
             global.results.push({ url: resultUrl, nomor: nomorWa, time: Date.now() });
@@ -231,15 +239,20 @@ app.post("/upload", upload.single("video"), async (req, res) => {
             setTimeout(() => {
                 if (fs.existsSync(normalized)) {
                     fs.unlink(normalized, () => {});
-                    console.log(`[AUTO DELETE LOG] Video dihapus dari server otomatis: ${outputFilename}`);
+                    console.log(`[AUTO DELETE] ${outputFilename}`);
                 }
             }, 5 * 60 * 1000);
         });
 
-    } catch (error) {
+    } catch (e) {
+        if (currentProcess > 0) currentProcess--;
+        if (waitingQueue.length > 0) {
+            const next = waitingQueue.shift();
+            next();
+        }
+        console.log("[LOG CATCH ERROR]:", e.message);
         if (fileVideo && fs.existsSync(fileVideo.path)) fs.unlinkSync(fileVideo.path);
-        console.log("[LOG CRASH ERROR RUTE UTAMA]: ", error.message);
-        return kirimRespon({ status: false, error: "Internal Server Error: " + error.message });
+        return kirimRespon({ status: false, error: "Gagal memproses HD video: " + e.message });
     }
 });
 
@@ -257,8 +270,7 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
         fs.renameSync(fileChunk.path, chunkPath);
 
         if (parseInt(chunkIndex) === parseInt(totalChunks) - 1) {
-            console.log(`[LOG CHUNKING] Potongan terakhir diterima. Menjahit file video: ${filename}...`);
-            
+            console.log(`[LOG CHUNKING] Potongan komplit. Menjahit: ${filename}...`);
             const finalPath = path.join(__dirname, "uploads", `${Date.now()}_${filename}`);
             const writeStream = fs.createWriteStream(finalPath);
 
@@ -271,15 +283,12 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
             writeStream.end();
             fs.rmdirSync(chunkDir); 
 
-            console.log("[LOG CHUNKING] File video berhasil dijahit total.");
-
             const videoId = `vid_${Date.now()}`;
-            global.videoProgress[videoId] = { status: "proses", message: "Video selesai dijahit! Memulai verifikasi..." };
+            global.videoProgress[videoId] = { status: "proses", message: "Sedang mengompres video jadi HD..." };
 
-            console.log("[LOG CHUNKING] Melepas respons ke frontend (Mencegah macet 49%).");
-            res.json({ status: true, id: videoId, message: "File berhasil disatukan, memproses HD..." });
+            console.log("[LOG CHUNKING] Mengunci rute chunk, merilis respon sukses ke HP.");
+            res.json({ status: true, id: videoId, message: "Video berhasil disatukan!" });
 
-            console.log("[LOG BACKGROUND] Mengoper data video ke pemroses latar belakang (Express Memory Router)...");
             setImmediate(() => {
                 req.file = {
                     path: finalPath,
@@ -296,7 +305,7 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
                 if (ruteUploadUtama) {
                     ruteUploadUtama.handle(req, res, () => {});
                 } else {
-                    console.log("[LOG CHUNK ERROR]: Fungsi rute /upload internal tidak ditemukan");
+                    console.log("[LOG ERROR CHUNK]: Target rute /upload internal hilang");
                 }
             });
             return;
@@ -305,7 +314,7 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
         return res.json({ status: true, message: `Chunk ${chunkIndex} sukses disimpan.` });
 
     } catch (error) {
-        console.log("[LOG CRASH ERROR CHUNKING]: ", error.message);
+        console.log("[LOG ERROR CHUNKING]: ", error.message);
         return res.json({ status: false, error: "Gagal menyatukan potongan file: " + error.message });
     }
 });
