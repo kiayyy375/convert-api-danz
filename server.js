@@ -27,7 +27,7 @@ const app = express()
 app.use(cors({
     origin: "*",
     methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "authorization"]
+    allowedHeaders: ["Content-Type", "authorization", "upload-metadata", "upload-length", "upload-offset", "tus-resumable"]
 }))
 
 app.options("*", cors())
@@ -83,7 +83,7 @@ const waitingQueue = []
 
 const { Server } = require("@tus/server");
 
-
+// Inisialisasi Tus Server pendeteksi fragmen file
 const tusServer = new Server({
     path: "/files",
     datastore: new (require("@tus/server").FileDatastore)({
@@ -100,7 +100,7 @@ const tusServer = new Server({
         global.videoProgress[videoId] = { status: "proses", message: "Memverifikasi nomor grup WhatsApp..." };
 
         try {
-
+            // 1. CEK MEMBER GITHUB
             const github = await axios.get(
                 "https://api.github.com/repos/xyron11/cekverif/contents/verify.json",
                 {
@@ -137,7 +137,7 @@ const tusServer = new Server({
                 return;
             }
 
-
+            // 2. CEK FORMAT EXTENSION
             const ext = originalname.split(".").pop().toLowerCase();
             const allow = ["mp4", "mov", "mkv", "avi", "webm", "m4v"];
             if (!allow.includes(ext)) {
@@ -146,7 +146,7 @@ const tusServer = new Server({
                 return;
             }
 
-
+            // 3. HITUNG DURASI & BITRATE IDEAL
             global.videoProgress[videoId] = { status: "proses", message: "Menghitung kapasitas video..." };
             const durasiVideo = await dapatkanDurasiVideo(filePath);
             let bitrateIdeal = Math.floor(113246208 / durasiVideo); 
@@ -154,7 +154,7 @@ const tusServer = new Server({
             if (bitrateIdeal < 1200000) bitrateIdeal = 1200000; 
             const targetBitrateKbps = `${Math.floor(bitrateIdeal / 1000)}k`;
 
-            
+            // 4. CEK FPS ASLI
             const fpsVideo = await new Promise((resolve) => {
                 exec(`ffprobe -v 0 -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 "${filePath}"`, (err, stdout) => {
                     if (err) return resolve(30);
@@ -166,14 +166,14 @@ const tusServer = new Server({
             });
             const targetFps = fpsVideo > 60 ? fpsVideo : 60;
 
-
+            // 5. SISTEM ANTREAN MAX PROCESS
             if (currentProcess >= MAX_PROCESS) {
                 global.videoProgress[videoId] = { status: "proses", message: "Server sibuk, video kamu masuk daftar antrean..." };
                 await new Promise(resolve => { waitingQueue.push(resolve); });
             }
             currentProcess++;
 
-
+            // 6. MULAI RENDER FFMPEG
             global.videoProgress[videoId] = { status: "proses", message: "Sedang mengompres video jadi HD..." };
             const outputFilename = `${Date.now()}_HD_DanzClean.mp4`;
             const normalized = path.join(__dirname, "public", outputFilename);
@@ -221,7 +221,7 @@ const tusServer = new Server({
     }
 });
 
-
+// Daftarkan endpoint Tus Server ke route Express
 app.all("/files/*", (req, res) => { tusServer.handle(req, res); });
 app.all("/files", (req, res) => { tusServer.handle(req, res); });
 
