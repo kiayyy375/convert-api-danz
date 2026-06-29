@@ -90,13 +90,18 @@ app.post("/upload", upload.single("video"), async (req, res) => {
     };
 
     try {
+        console.log(`[LOG] Memulai verifikasi rute utama untuk nomor: ${nomorWa}`);
+        
         if (!process.env.GITHUB_TOKEN) {
+            console.log("[LOG ERROR] GITHUB_TOKEN tidak ditemukan di environment");
             return kirimRespon({ status: false, error: "GITHUB_TOKEN is required" });
         }
         if (!fileVideo) {
+            console.log("[LOG ERROR] File video kosong");
             return kirimRespon({ status: false, error: "File video kosong masee" });
         }
         if (!nomorWa) {
+            console.log("[LOG ERROR] Nomor WA kosong");
             if (fs.existsSync(fileVideo.path)) fs.unlinkSync(fileVideo.path);
             return kirimRespon({ status: false, error: "Nomor WhatsApp kosong masee" });
         }
@@ -105,10 +110,12 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         const tokenValid = `Bearer ${Buffer.from("DANZZ").toString("base64")}`;
 
         if (!isFromChunk && (!tokenAuth || tokenAuth !== tokenValid)) {
+            console.log("[LOG ERROR] Token authorization salah atau akses ilegal");
             if (fs.existsSync(fileVideo.path)) fs.unlinkSync(fileVideo.path);
             return kirimRespon({ status: false, error: "Akses ilegal bro." });
         }
 
+        console.log("[LOG] Menghubungi API GitHub untuk cek grup...");
         const github = await axios.get(
             "https://api.github.com/repos/xyron11/cekverif/contents/verify.json",
             {
@@ -123,6 +130,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         const members = JSON.parse(content);
 
         if (!members.includes(nomorWa)) {
+            console.log(`[LOG] Nomor ${nomorWa} tidak ada di primary grup GitHub, mencoba cek realtime raw...`);
             try {
                 const realtime = await axios.get(
                     "https://raw.githubusercontent.com/xyron11/cekverif/main/verify.json?nocache=" + Date.now(),
@@ -130,6 +138,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
                 );
                 const realtimeMembers = realtime.data || [];
                 if (!realtimeMembers.includes(nomorWa)) {
+                    console.log(`[LOG KEPUTUSAN] Nomor ${nomorWa} RESMI TIDAK TERDAFTAR DI GRUP.`);
                     if (fs.existsSync(fileVideo.path)) fs.unlinkSync(fileVideo.path);
                     return kirimRespon({
                         status: false,
@@ -137,7 +146,8 @@ app.post("/upload", upload.single("video"), async (req, res) => {
                         join: "https://chat.whatsapp.com/BVtogIjS1hAD0qOMhJ3f6a"
                     });
                 }
-            } catch {
+            } catch (errDb) {
+                console.log("[LOG ERROR] Gagal mengambil backup realtime raw GitHub:", errDb.message);
                 if (fs.existsSync(fileVideo.path)) fs.unlinkSync(fileVideo.path);
                 return kirimRespon({
                     status: false,
@@ -146,6 +156,8 @@ app.post("/upload", upload.single("video"), async (req, res) => {
                 });
             }
         }
+
+        console.log(`[LOG SUKSES] Nomor ${nomorWa} lolos verifikasi grup!`);
 
         const outputFilename = `${Date.now()}_HD_DanzClean.mp4`;
         const normalized = path.join(__dirname, "public", outputFilename);
@@ -167,6 +179,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         const targetFps = fpsVideo > 60 ? fpsVideo : 60;
 
         if (currentProcess >= MAX_PROCESS) {
+            console.log(`[LOG ANTRIAN] Server penuh. Memasukkan video ke dalam antrean...`);
             await new Promise(resolve => { waitingQueue.push(resolve); });
         }
         currentProcess++;
@@ -175,6 +188,8 @@ app.post("/upload", upload.single("video"), async (req, res) => {
 
         const videoId = req.body.videoIdFlag || `vid_${Date.now()}`;
         global.videoProgress[videoId] = { status: "proses", message: "Sedang mengompres video jadi HD..." };
+
+        console.log(`[LOG FFMPEG] Memulai eksekusi render video ke HD (${targetFps} FPS)...`);
 
         if (!isFromChunk) {
             res.json({
@@ -187,6 +202,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         exec(perintahFfmpeg, { maxBuffer: 1024 * 1024 * 100 }, (err, stdout, stderr) => {
             currentProcess--;
             if (waitingQueue.length > 0) {
+                console.log("[LOG ANTRIAN] Mengeluarkan slot antrean berikutnya...");
                 const next = waitingQueue.shift();
                 next();
             }
@@ -197,6 +213,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
 
             if (err && !sukses) {
                 const errorText = String(stderr || err.message || err);
+                console.log("[LOG ERROR] FFmpeg gagal merender video:", errorText.slice(-200));
                 global.videoProgress[videoId] = { status: "error", message: "Video tidak dapat diproses oleh server." };
                 sendTelegram(`❌ DanzClean Error\n\nNomor:\n${nomorWa}\n\nFile:\n${fileVideo.originalname}\n\nError:\n${errorText.slice(-3500)}`);
                 return;
@@ -206,20 +223,22 @@ app.post("/upload", upload.single("video"), async (req, res) => {
             const protocolPenyedia = req.protocol;
             const resultUrl = `${protocolPenyedia}://${domainPenyedia}/video/${outputFilename}`;
 
+            console.log(`[LOG BERHASIL MATANG] Hasil video siap di-download: ${resultUrl}`);
+
             global.videoProgress[videoId] = { status: "selesai", message: "Video HD Matang!", url: resultUrl };
             global.results.push({ url: resultUrl, nomor: nomorWa, time: Date.now() });
 
             setTimeout(() => {
                 if (fs.existsSync(normalized)) {
                     fs.unlink(normalized, () => {});
-                    console.log(`[AUTO DELETE] ${outputFilename}`);
+                    console.log(`[AUTO DELETE LOG] Video dihapus dari server otomatis: ${outputFilename}`);
                 }
             }, 5 * 60 * 1000);
         });
 
     } catch (error) {
         if (fileVideo && fs.existsSync(fileVideo.path)) fs.unlinkSync(fileVideo.path);
-        console.log("[DanzClean Error]: ", error.message);
+        console.log("[LOG CRASH ERROR RUTE UTAMA]: ", error.message);
         return kirimRespon({ status: false, error: "Internal Server Error: " + error.message });
     }
 });
@@ -238,6 +257,8 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
         fs.renameSync(fileChunk.path, chunkPath);
 
         if (parseInt(chunkIndex) === parseInt(totalChunks) - 1) {
+            console.log(`[LOG CHUNKING] Potongan terakhir diterima. Menjahit file video: ${filename}...`);
+            
             const finalPath = path.join(__dirname, "uploads", `${Date.now()}_${filename}`);
             const writeStream = fs.createWriteStream(finalPath);
 
@@ -250,11 +271,15 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
             writeStream.end();
             fs.rmdirSync(chunkDir); 
 
+            console.log("[LOG CHUNKING] File video berhasil dijahit total.");
+
             const videoId = `vid_${Date.now()}`;
             global.videoProgress[videoId] = { status: "proses", message: "Video selesai dijahit! Memulai verifikasi..." };
 
+            console.log("[LOG CHUNKING] Melepas respons ke frontend (Mencegah macet 49%).");
             res.json({ status: true, id: videoId, message: "File berhasil disatukan, memproses HD..." });
 
+            console.log("[LOG BACKGROUND] Mengoper data video ke pemroses latar belakang (Express Memory Router)...");
             setImmediate(() => {
                 req.file = {
                     path: finalPath,
@@ -271,7 +296,7 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
                 if (ruteUploadUtama) {
                     ruteUploadUtama.handle(req, res, () => {});
                 } else {
-                    console.log("[DanzClean Chunk Error]: Fungsi rute /upload tidak ditemukan");
+                    console.log("[LOG CHUNK ERROR]: Fungsi rute /upload internal tidak ditemukan");
                 }
             });
             return;
@@ -280,7 +305,7 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
         return res.json({ status: true, message: `Chunk ${chunkIndex} sukses disimpan.` });
 
     } catch (error) {
-        console.log("[DanzClean Chunk Error]: ", error.message);
+        console.log("[LOG CRASH ERROR CHUNKING]: ", error.message);
         return res.json({ status: false, error: "Gagal menyatukan potongan file: " + error.message });
     }
 });
