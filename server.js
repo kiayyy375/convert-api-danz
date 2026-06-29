@@ -82,11 +82,12 @@ const MAX_PROCESS = 2
 const waitingQueue = []
 
 const { Server } = require("@tus/server");
+const { FileDatastore } = require("@tus/file-datastore");
 
 // Inisialisasi Tus Server pendeteksi fragmen file
 const tusServer = new Server({
     path: "/files",
-    datastore: new (require("@tus/server").FileDatastore)({
+    datastore: new FileDatastore({
         directory: "./uploads",
     }),
     onUploadFinish: async (req, res, upload) => {
