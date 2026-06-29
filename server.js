@@ -255,10 +255,11 @@ app.post("/api/upload-chunk", upload.single("videoChunk"), async (req, res) => {
             const tokenTokenan = `Bearer ${Buffer.from("DANZZ").toString("base64")}`;
             const targetPort = process.env.PORT || 3000;
 
-            const responUtama = await axios.post(`http://127.0.0.1:${targetPort}/api/upload`, form, {
-                headers: { ...form.getHeaders(), "authorization": tokenTokenan },
-                maxContentLength: Infinity, maxBodyLength: Infinity
-            });
+            const responUtama = await axios.post(`http://127.0.0.1:${targetPort}/upload`, form, {
+    headers: { ...form.getHeaders(), "authorization": tokenTokenan },
+    maxContentLength: Infinity, maxBodyLength: Infinity
+});
+
 
             if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
             return res.json(responUtama.data);
